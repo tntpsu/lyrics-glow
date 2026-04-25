@@ -95,4 +95,4 @@ LRCLIB ships `Access-Control-Allow-Origin: *`, so the WebView can call it direct
 
 ## Roadmap
 
-Full plan in `~/Documents/PhilsHome/ROADMAP.md` § "Plan: Lyrics Overlay".
+Full plan in `~/Documents/Pulse/ROADMAP.md` § "Plan: Lyrics Overlay".
