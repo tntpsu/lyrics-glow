@@ -2,16 +2,18 @@
   "package_id": "com.philtullai.lyricsglow",
   "edition": "202601",
   "name": "Lyrics Glow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "min_app_version": "2.0.0",
   "min_sdk_version": "0.0.10",
   "entrypoint": "index.html",
   "permissions": [
     {
       "name": "network",
-      "desc": "Fetches time-synced lyrics from LRCLIB (community-maintained, no account required) for the song you enter on the phone settings page.",
+      "desc": "Fetches time-synced lyrics from LRCLIB (community-maintained, no account required) for the song you enter on the phone settings page. In auto-detect mode also polls the user's phils-bridge LAN/Tailscale endpoint for the currently-playing track on their Mac.",
       "whitelist": [
-        "https://lrclib.net"
+        "https://lrclib.net",
+        "http://100.70.251.22:8790",
+        "http://10.168.168.105:8790"
       ]
     }
   ],

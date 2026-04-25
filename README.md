@@ -4,17 +4,27 @@
 
 A standalone Even Realities G2 plugin that scrolls time-synced lyrics on the 576×288 greyscale display in lockstep with whatever song you tell it. Three-line karaoke window (prev / **▶ current** / next / next+1), manual play/pause via tap, swipe to nudge ±1 line if the sync drifts.
 
-## Status: v0.1.0 (manual song picker; auto-detect comes in v0.2)
+## Status: v0.2.0 (auto-detect Mac-side music via phils-bridge)
 
-This release ships the full karaoke renderer + LRCLIB integration, but stops short of auto-detecting "now playing" — you type the artist + title in phone settings and hit **Load**. Auto-detect (Spotify OAuth → currently-playing → song change events) lands in v0.2.0 once the phone-side bridge exists.
+The full karaoke renderer + LRCLIB lookup from v0.1.0, plus an optional auto-detect mode: paste your phils-bridge URL and toggle the checkbox, and Lyrics Glow will poll `/now-playing.json` every 3s, fetch fresh LRCLIB lyrics on every track change, and anchor the karaoke clock to the bridge-reported playback position. Works for music playing on your Mac (Music or Spotify desktop apps via AppleScript). iPhone Spotify auto-detect needs Spotify OAuth and is deferred to v0.3.
 
 | Version | What's in it |
 |---|---|
-| **v0.1.0** *(current)* | Phone-side song picker, LRCLIB lookup, time-synced 3-line karaoke window, tap pause/resume, swipe ±1 line, offset slider, persistent last-song memory, mock-fallback when only plain (untimed) lyrics are available |
-| v0.2.0 *(planned)* | Spotify OAuth + auto-detect "now playing" via a new phone-side bridge (`~/ai-agents/lyrics-bridge`) |
-| v0.3.0 *(planned)* | Musixmatch fallback for tracks LRCLIB doesn't have, lyrics provider preference toggle |
+| v0.1.0 | Phone-side song picker, LRCLIB lookup, time-synced 3-line karaoke window, tap pause/resume, swipe ±1 line, offset slider, persistent last-song memory, plain-lyrics fallback |
+| **v0.2.0** *(current)* | Auto-detect mode: phils-bridge `/now-playing.json` polling, automatic track-change handling, position-based clock anchoring, drift correction (re-anchors when our clock and the Mac clock differ by more than 2s) |
+| v0.3.0 *(planned)* | Spotify OAuth on the bridge so iPhone Spotify playback also auto-detects, Musixmatch fallback for tracks LRCLIB doesn't have |
 
-## How it works
+## How auto-detect works (v0.2.0)
+
+1. Make sure your phils-bridge is running (`~/ai-agents/phils-bridge/server.py` on port 8790).
+2. In Lyrics Glow phone settings, paste the bridge URL (e.g. `http://10.168.168.105:8790` or your Tailscale IP) and tick **Use auto-detect**.
+3. Start playing a song in Music or Spotify on your Mac.
+4. Within 3s the app fetches the matching LRCLIB lyrics, anchors the karaoke clock to the current playback position, and the glasses start scrolling in sync.
+5. Pause Mac playback → karaoke pauses. Skip to next track → fresh lyrics auto-load. Drift > 2s → auto re-anchor.
+
+Manual song picker still works as before — useful when LRCLIB doesn't have the track or you want to scrub to a different song. The two modes coexist; turning auto-detect off leaves the manual flow untouched.
+
+## How it works (manual mode)
 
 1. Open Lyrics Glow from the Even Hub launcher on your phone.
 2. Type **Artist** + **Title** into the phone settings page (e.g. `Queen` / `Bohemian Rhapsody`).

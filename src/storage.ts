@@ -39,6 +39,8 @@ async function writeRaw(key: string, value: string): Promise<void> {
 const KEY_ARTIST = 'lyricsglow:artist:v1'
 const KEY_TRACK = 'lyricsglow:track:v1'
 const KEY_OFFSET = 'lyricsglow:offset-ms:v1'
+const KEY_BRIDGE_URL = 'lyricsglow:bridge-url:v1'
+const KEY_AUTO_DETECT = 'lyricsglow:auto-detect:v1'
 
 export async function getLastSong(): Promise<{ artist: string; track: string }> {
   const a = (await readRaw(KEY_ARTIST)) ?? ''
@@ -60,4 +62,20 @@ export async function getOffsetMs(): Promise<number> {
 
 export async function setOffsetMs(ms: number): Promise<void> {
   await writeRaw(KEY_OFFSET, String(Math.round(ms)))
+}
+
+export async function getBridgeUrl(): Promise<string> {
+  return (await readRaw(KEY_BRIDGE_URL)) ?? ''
+}
+
+export async function setBridgeUrl(url: string): Promise<void> {
+  await writeRaw(KEY_BRIDGE_URL, url.trim())
+}
+
+export async function getAutoDetect(): Promise<boolean> {
+  return (await readRaw(KEY_AUTO_DETECT)) === '1'
+}
+
+export async function setAutoDetect(on: boolean): Promise<void> {
+  await writeRaw(KEY_AUTO_DETECT, on ? '1' : '0')
 }

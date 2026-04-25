@@ -1,16 +1,35 @@
 // LyricsGlow — karaoke-through-glasses.
 //
-// v0.1.0 scope: phone-side song picker (artist + title) → LRCLIB lookup →
+// v0.1.0: phone-side song picker (artist + title) → LRCLIB lookup →
 // 3-line karaoke window on glasses, advanced by a local 250ms tick against
 // the LRC timestamps. Manual offset slider compensates for BLE+render lag.
-// No Spotify auto-detect yet; that's v0.2.0 (needs phone-side bridge + OAuth).
+//
+// v0.2.0 (this file): optional auto-detect mode. When the user pastes a
+// phils-bridge URL and toggles auto-detect on, the app polls
+// /now-playing.json every NOW_PLAYING_POLL_MS, fetches fresh LRCLIB lyrics
+// on track change, and anchors playback to the bridge-reported position.
+// Works for music playing on the user's Mac (Music or Spotify desktop apps
+// via AppleScript). iPhone Spotify auto-detect would require Spotify OAuth
+// and is deferred to v0.3+.
 
 import { connectEvenRuntime, type EvenRuntime, type InputSource, type SwipeDir } from './even'
 import { fetchLyrics } from './lrclib'
 import { lineWindow, parseLrc, pickLineIndex, type LrcLine } from './lrc'
-import { getLastSong, getOffsetMs, setLastSong, setOffsetMs, setStorageBridge } from './storage'
+import { fetchNowPlaying, trackKey, type NowPlayingTrack } from './now-playing'
+import {
+  getAutoDetect,
+  getBridgeUrl,
+  getLastSong,
+  getOffsetMs,
+  setAutoDetect,
+  setBridgeUrl,
+  setLastSong,
+  setOffsetMs,
+  setStorageBridge,
+} from './storage'
 
 const RENDER_TICK_MS = 250
+const NOW_PLAYING_POLL_MS = 3_000 // bridge poll cadence in auto-detect mode
 
 interface SongState {
   artist: string
@@ -38,6 +57,13 @@ let manualLineBias = 0
 let renderTimer: ReturnType<typeof setInterval> | null = null
 let lastRenderedKey = '' // dedupe identical paints (line index + bias + paused)
 
+// Auto-detect (v0.2.0) state.
+let bridgeUrl = ''
+let autoDetectOn = false
+let nowPlayingTimer: ReturnType<typeof setInterval> | null = null
+let lastTrackKey = '' // detect track changes between polls
+let autoDetectStatus = '' // last status line for the phone-side UI
+
 const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
   <main style="font-family: system-ui, sans-serif; max-width: 560px; margin: 2rem auto; padding: 0 1rem; color: #232323;">
@@ -59,6 +85,20 @@ app.innerHTML = `
       <label style="display:block; font-size:.85rem; font-weight:600; margin:1rem 0 .25rem;">Offset compensation: <span id="offset-label">0</span> ms</label>
       <input id="offset" type="range" min="-3000" max="3000" step="100" value="0" style="width:100%;" />
       <p style="font-size:.75rem; color:#777; margin:.25rem 0 0 0;">Negative = lyrics show earlier. Positive = lyrics show later.</p>
+    </section>
+
+    <section style="background:#f5f5f5; padding:1rem 1.25rem; border-radius:8px; margin-bottom:1rem;">
+      <h3 style="margin:0 0 .5rem 0; font-size:1rem;">Auto-detect (v0.2)</h3>
+      <p style="margin:0 0 .75rem 0; font-size:.85rem; color:#555;">Polls phils-bridge for the song playing on your Mac (Music or Spotify desktop) and auto-fetches lyrics on every track change. iPhone Spotify isn't supported yet (needs OAuth — v0.3).</p>
+
+      <label style="display:block; font-size:.85rem; font-weight:600; margin-bottom:.25rem;">phils-bridge URL</label>
+      <input id="bridge-url" type="text" placeholder="http://10.168.168.105:8790" style="width:100%; padding:.5rem; font-size:.95rem; box-sizing:border-box;" />
+      <p style="font-size:.7rem; color:#777; margin:.25rem 0 .75rem 0;">Same bridge that powers Pulse. Tailscale-friendly.</p>
+
+      <label style="display:flex; align-items:center; gap:.5rem; font-size:.95rem; cursor:pointer;">
+        <input id="auto-detect" type="checkbox" /> Use auto-detect when Mac music is playing
+      </label>
+      <p id="auto-status" style="font-size:.75rem; color:#666; margin:.5rem 0 0 0;">—</p>
     </section>
 
     <p id="status" style="font-size:.9rem; color:#444; margin:0 0 .5rem 0;">Initialising…</p>
@@ -87,6 +127,9 @@ const offsetSlider = app.querySelector<HTMLInputElement>('#offset')!
 const offsetLabel = app.querySelector<HTMLSpanElement>('#offset-label')!
 const status = app.querySelector<HTMLParagraphElement>('#status')!
 const preview = app.querySelector<HTMLPreElement>('#preview')!
+const bridgeUrlInput = app.querySelector<HTMLInputElement>('#bridge-url')!
+const autoDetectInput = app.querySelector<HTMLInputElement>('#auto-detect')!
+const autoStatus = app.querySelector<HTMLParagraphElement>('#auto-status')!
 
 // --- timing ---
 
@@ -266,6 +309,133 @@ offsetSlider.addEventListener('input', () => {
   void paint()
 })
 
+// --- auto-detect (v0.2.0) ---
+
+async function loadFromTrack(artist: string, track: string, anchorPositionMs: number): Promise<void> {
+  // Mirror loadFromInputs but with a known starting position so the karaoke
+  // clock anchors to where playback actually is, not where it began.
+  const result = await fetchLyrics({ artistName: artist, trackName: track })
+  if (result.ok === false) {
+    const r = result
+    autoDetectStatus =
+      r.status === 'not-found'
+        ? `No LRCLIB match for ${track} — ${artist}`
+        : `Lookup failed: ${r.detail ?? r.status}`
+    autoStatus.textContent = autoDetectStatus
+    return
+  }
+  await setLastSong(artist, track)
+  const lrcLines = result.track.syncedLyrics ? parseLrc(result.track.syncedLyrics) : []
+  song = {
+    artist: result.track.artistName,
+    track: result.track.trackName,
+    lines: lrcLines,
+    plainLyrics: result.track.plainLyrics,
+  }
+  pausedAtMs = anchorPositionMs
+  startedAtMs = Date.now() - anchorPositionMs
+  manualLineBias = 0
+  isPlaying = true
+  playBtn.textContent = '❙❙ Pause'
+  playBtn.disabled = false
+  resetBtn.disabled = false
+  artistInput.value = artist
+  trackInput.value = track
+  if (!renderTimer) renderTimer = setInterval(() => void paint(), RENDER_TICK_MS)
+  autoDetectStatus = `Auto-loaded: ${result.track.trackName} — ${result.track.artistName}${
+    lrcLines.length > 0 ? '' : ' (plain only)'
+  }`
+  autoStatus.textContent = autoDetectStatus
+  await paint()
+}
+
+async function pollNowPlaying(): Promise<void> {
+  if (!autoDetectOn) return
+  const result = await fetchNowPlaying(bridgeUrl)
+  if (result.ok === false) {
+    autoDetectStatus = `Bridge: ${result.status}${result.detail ? ` (${result.detail})` : ''}`
+    autoStatus.textContent = autoDetectStatus
+    return
+  }
+  const t: NowPlayingTrack = result.track
+  if (!t.playing) {
+    if (isPlaying) {
+      // Mac stopped → pause our karaoke clock so it stops moving.
+      setPlaying(false)
+    }
+    autoDetectStatus = 'Mac idle — nothing playing'
+    autoStatus.textContent = autoDetectStatus
+    lastTrackKey = ''
+    return
+  }
+  const key = trackKey(t)
+  if (key && key !== lastTrackKey) {
+    // Track change — fetch fresh lyrics and anchor to the bridge-reported
+    // position. Use 0 as anchor when position isn't available so we at
+    // least start from the top.
+    lastTrackKey = key
+    await loadFromTrack(t.artist ?? '', t.track ?? '', t.positionMs ?? 0)
+    return
+  }
+  // Same track — drift correction. If our clock has drifted more than 2s
+  // from the bridge's reported position, re-anchor.
+  if (t.positionMs !== null && t.positionMs !== undefined && song) {
+    const ourPos = isPlaying ? Date.now() - startedAtMs : pausedAtMs
+    if (Math.abs(ourPos - t.positionMs) > 2_000) {
+      pausedAtMs = t.positionMs
+      startedAtMs = Date.now() - t.positionMs
+      if (!isPlaying) {
+        isPlaying = true
+        playBtn.textContent = '❙❙ Pause'
+      }
+      autoDetectStatus = `Re-anchored to ${Math.round(t.positionMs / 1000)}s`
+      autoStatus.textContent = autoDetectStatus
+    }
+  }
+}
+
+function startAutoDetect(): void {
+  if (nowPlayingTimer) return
+  nowPlayingTimer = setInterval(() => void pollNowPlaying(), NOW_PLAYING_POLL_MS)
+  void pollNowPlaying() // fire one immediately
+}
+
+function stopAutoDetect(): void {
+  if (nowPlayingTimer) {
+    clearInterval(nowPlayingTimer)
+    nowPlayingTimer = null
+  }
+  lastTrackKey = ''
+  autoDetectStatus = 'Auto-detect off'
+  autoStatus.textContent = autoDetectStatus
+}
+
+bridgeUrlInput.addEventListener('change', () => {
+  bridgeUrl = bridgeUrlInput.value.trim()
+  void setBridgeUrl(bridgeUrl)
+  if (autoDetectOn) {
+    stopAutoDetect()
+    startAutoDetect()
+  }
+})
+
+autoDetectInput.addEventListener('change', () => {
+  autoDetectOn = autoDetectInput.checked
+  void setAutoDetect(autoDetectOn)
+  if (autoDetectOn) {
+    if (!bridgeUrl) {
+      autoDetectStatus = 'Set the bridge URL first.'
+      autoStatus.textContent = autoDetectStatus
+      autoDetectInput.checked = false
+      autoDetectOn = false
+      return
+    }
+    startAutoDetect()
+  } else {
+    stopAutoDetect()
+  }
+})
+
 // --- bootstrap ---
 
 async function bootstrap(): Promise<void> {
@@ -285,6 +455,17 @@ async function bootstrap(): Promise<void> {
   offsetMs = await getOffsetMs()
   offsetSlider.value = String(offsetMs)
   offsetLabel.textContent = String(offsetMs)
+  bridgeUrl = await getBridgeUrl()
+  bridgeUrlInput.value = bridgeUrl
+  autoDetectOn = await getAutoDetect()
+  autoDetectInput.checked = autoDetectOn
+  if (autoDetectOn && bridgeUrl) {
+    startAutoDetect()
+  } else if (autoDetectOn && !bridgeUrl) {
+    autoDetectOn = false
+    autoDetectInput.checked = false
+    autoStatus.textContent = 'Set the bridge URL to enable auto-detect.'
+  }
 
   if (!even) {
     status.textContent = 'Running outside the Even runtime — browser preview only.'
