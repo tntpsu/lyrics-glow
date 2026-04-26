@@ -1,0 +1,111 @@
+# Known Quirks — Even Hub G2 plugins (and Cloudflare Workers)
+
+Real bugs we've hit + how to avoid them. Each entry is verified empirically.
+
+## EvenHub WebView (iOS WKWebView host)
+
+### `new WebSocket(url)` open handshake fails opaquely
+
+The WebView's `WebSocket()` constructor fires an `error` event during the upgrade handshake even when the worker is fully reachable from a Node.js client. The same wss:// URL works from Node and from desktop browsers — it ONLY fails inside the EvenHub WebView. The browser-spec error message ("WS open failed") deliberately hides handshake details for security, so you can't get more information from the client side.
+
+**Fix:** don't use WebSocket from the plugin. Use chunked HTTP POST via `fetch()` instead — the network whitelist permits fetch and we've verified binary POSTs work. Cue v0.3.0 ships this pattern: buffer ~2.5s of audio, POST a chunk to `/transcribe`, get JSON back. Slightly higher latency than streaming but actually works.
+
+### `app.json` network whitelist is per-host, applies to fetch only
+
+The whitelist gates `fetch()` calls. WebSockets may be a separate (and currently more restrictive) gate. List the exact host with the scheme:
+
+```json
+"whitelist": [
+  "https://your-worker.workers.dev",
+  "wss://your-worker.workers.dev"
+]
+```
+
+**Don't** use placeholder URLs like `https://your-app.example.workers.dev` — they pass `evenhub pack` validation but block real traffic at runtime. The `lint-app-json.mjs` script in `scripts/` rejects placeholders.
+
+### `body: ArrayBuffer` in fetch can be flaky; use `Blob`
+
+WKWebView's fetch handles raw ArrayBuffers inconsistently across iOS versions, especially with CORS preflight on POST. Always wrap binary bodies:
+
+```js
+const body = new Blob([arrayBuffer], { type: 'application/octet-stream' })
+await fetch(url, { method: 'POST', body, ... })
+```
+
+### Fallback paths must surface a visible signal
+
+If your code falls back to mock-mode on any failure, the user must be able to *see* why. We had a multi-hour debug loop because the diagnostic transcript got immediately overwritten by mock script content. Pattern: keep an `err` field in your stats and render it on screen.
+
+## Cloudflare Workers
+
+### `fetch('wss://...')` returns HTTP 500
+
+The Workers runtime rejects `wss://` schemes in `fetch()` with `TypeError: Fetch API cannot load: wss://...`. Use `https://` and rely on the `Upgrade: websocket` header to negotiate the protocol upgrade.
+
+```ts
+// WRONG
+const r = await fetch('wss://api.example.com/ws', { headers: { Upgrade: 'websocket' } })
+// RIGHT
+const r = await fetch('https://api.example.com/ws', { headers: { Upgrade: 'websocket' } })
+```
+
+### Cloudflare bot detection (error 1010) on simple HTTP clients
+
+Python `urllib` and bare `curl` requests sometimes hit Cloudflare's bot challenge with HTTP 403 + error code 1010. Real browsers / WKWebView don't trigger it. For test scripts, set a real-looking User-Agent:
+
+```bash
+curl -H "User-Agent: Mozilla/5.0" ...
+```
+
+### `wrangler dev --local` doesn't fully proxy outbound WebSocket fetches
+
+Local Workerd doesn't behave identically to production for outbound `fetch()`-with-Upgrade calls — a successful upgrade can return 502 because the upstream connection isn't proxied. Test WebSocket-via-fetch against the deployed worker, not against `wrangler dev --local`.
+
+## SDK (`@evenrealities/even_hub_sdk` v0.0.10)
+
+### `setBackgroundState` / `onBackgroundRestore` don't exist
+
+The plugin docs reference these APIs but they're absent in v0.0.10. Re-fetch state on `FOREGROUND_ENTER_EVENT` instead of relying on a background-state hook.
+
+### Audio events arrive on the same `onEvenHubEvent` channel as input
+
+`bridge.audioControl(true)` enables mic capture; PCM frames arrive as `event.audioEvent.audioPcm` on the regular event handler. Don't expect a separate `onAudioFrame` channel.
+
+### `bridge.audioControl(true)` returns truthy regardless of permission
+
+The return value indicates the call was accepted by the SDK, not that the OS granted mic permission. If the user denies mic on their phone, you'll still get a truthy return + zero audio frames. Only way to detect: count incoming audio frames and surface "no frames after Ns" as a UI signal.
+
+### Concurrent `textContainerUpgrade` calls crash the BLE link
+
+Always serialize render calls through a mutex. The `enqueue()` pattern in `src/even.ts` is the canonical fix.
+
+## Testing
+
+### The simulator runs desktop Chromium, NOT iOS WKWebView
+
+Simulator passing != production passing. Specifically:
+- WebSocket works in the simulator but may fail in production
+- The simulator doesn't enforce `app.json` permissions at all
+- Fetch behaviors differ subtly (CORS preflight, binary body handling)
+
+For WKWebView quirks the only real test is on a physical device.
+
+### `@vitest-environment jsdom` for plugin state-machine tests
+
+Vitest's default env is `node` — DOM APIs aren't available. Add the directive at the top of any test file that needs `document` / `localStorage`:
+
+```ts
+// @vitest-environment jsdom
+```
+
+JSDOM is also Chromium-shaped, so it inherits the same "passing here doesn't prove production" caveat. But it IS the right tool for state-machine + handler-wiring tests that don't depend on the WebView itself.
+
+## Build / pack
+
+### `app.json` fields not all documented in the same place
+
+The build-and-deploy skill documents them well; the `evenhub pack` validator enforces a subset. Run `scripts/lint-app-json.mjs` before every pack — it catches the union of common errors (missing fields, version format, supported_languages allowlist, placeholder whitelist URLs).
+
+### Re-pack on every change to `app.json` or `dist/`
+
+The `.ehpk` is just a packaged snapshot of `app.json` + `dist/`. Forgetting to repack after a `app.json` whitelist edit is a real foot-gun — you'll see the OLD whitelist enforced on glasses even though the file looks right locally. The `prepack` lifecycle hook (or our pre-pack lint) reduces this risk.
