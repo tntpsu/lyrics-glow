@@ -90,6 +90,24 @@ Simulator passing != production passing. Specifically:
 
 For WKWebView quirks the only real test is on a physical device.
 
+### Testing layer matrix — what each layer catches
+
+| Layer | Engine | Catches | Cost | Trigger |
+|---|---|---|---|---|
+| Vitest unit | Node | Pure logic, parsers, transport contract | <1s | every commit |
+| JSDOM (`@vitest-environment jsdom`) | Chromium-shaped | DOM state machine, handler wiring, save→paint flows | ~1s | every commit |
+| Pre-pack lint (`scripts/lint-app-json.mjs`) | Node | Manifest errors, placeholder URLs, version typos | instant | `npm run pack` |
+| Backend integration (`scripts/test-backends.mjs`) | Node | API schema drift, dead routes, contract changes on Jina/LRCLIB/ESPN/widget_api/phils-bridge | ~5s | on demand / before deploy |
+| Worker integration (`scripts/test-worker.mjs`) | wrangler dev local | Cloudflare Workers fetch quirks (wss vs https), auth gates, route bugs | ~10s | on demand / before deploy |
+| Simulator e2e (`scripts/regression.mjs`) | Chromium WebView (Tauri) | Boot, gesture, render-loop liveness, mock fallback | ~10s | manual sim run |
+| **Playwright/WebKit** (`scripts/test-webkit.mjs` — Cue only) | macOS WebKit | JS-engine quirks closer to iOS WKWebView — fetch behavior, CORS, WebSocket open-handshake | ~5s | on demand |
+| iOS Simulator + Mobile Safari | iOS WKWebView in iOS Simulator | Real iOS WebView behavior (closest desktop-only test) | requires Xcode | rarely |
+| Real-device CI | Real glasses + EvenHub WKWebView | All iOS-only platform quirks: ATS, CORS, sandbox, BLE | manual | as needed |
+
+**The structural gap that no automated test currently covers**: iOS WKWebView behavior layered on top of WebKit (App Transport Security, app sandbox restrictions, EvenHub's custom WKContentRuleList if any). For Cue specifically: a binary POST that succeeds from macOS WebKit can still fail from iOS WKWebView due to ATS or sandbox config. The only fixes are (a) iOS Simulator + Xcode (heavy) or (b) real device.
+
+Practical default: run unit + JSDOM + lint on every commit; run integration + WebKit before any real-device test cycle. Real device covers the last 10% no automation can.
+
 ### `@vitest-environment jsdom` for plugin state-machine tests
 
 Vitest's default env is `node` — DOM APIs aren't available. Add the directive at the top of any test file that needs `document` / `localStorage`:
