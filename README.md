@@ -4,7 +4,7 @@
 
 A standalone Even Realities G2 plugin that scrolls time-synced lyrics on the 576×288 greyscale display in lockstep with whatever song you tell it. Three-line karaoke window (prev / **▶ current** / next / next+1), manual play/pause via tap, swipe to nudge ±1 line if the sync drifts.
 
-## Status: v0.2.0 (auto-detect Mac-side music via phils-bridge)
+## Status: v0.2.1 (phone-side fetch debug log) (auto-detect Mac-side music via phils-bridge)
 
 The full karaoke renderer + LRCLIB lookup from v0.1.0, plus an optional auto-detect mode: paste your phils-bridge URL and toggle the checkbox, and Lyrics Glow will poll `/now-playing.json` every 3s, fetch fresh LRCLIB lyrics on every track change, and anchor the karaoke clock to the bridge-reported playback position. Works for music playing on your Mac (Music or Spotify desktop apps via AppleScript). iPhone Spotify auto-detect needs Spotify OAuth and is deferred to v0.3.
 

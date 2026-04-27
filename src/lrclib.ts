@@ -32,6 +32,23 @@ export interface LrclibQuery {
 const BASE = 'https://lrclib.net'
 const FETCH_TIMEOUT_MS = 8_000
 
+// v0.2.1: fetch-log hook so the phone-side debug panel can show every
+// LRCLIB call's URL, status, latency, and any error. Same pattern as
+// Glance v0.5.1 + Cue v0.3.4. Decoupled — main.ts wires the buffer.
+export interface LyricsFetchLog {
+  ts: number
+  url: string
+  via: 'lrclib' | 'phils-bridge'
+  status: number | null
+  ms: number
+  ok: boolean
+  error?: string
+}
+let logSink: ((entry: LyricsFetchLog) => void) | null = null
+export function setLyricsLogger(sink: ((entry: LyricsFetchLog) => void) | null): void {
+  logSink = sink
+}
+
 /**
  * Look up lyrics for a single (artist, track) pair. Wraps the GET /api/get endpoint.
  * Returns a tagged-union result so callers can render errors without try/catch sprawl.
@@ -49,15 +66,19 @@ export async function fetchLyrics(query: LrclibQuery): Promise<LrclibResult> {
 
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)
+  const url = `${BASE}/api/get?${params.toString()}`
+  const startedAt = Date.now()
   try {
-    const resp = await fetch(`${BASE}/api/get?${params.toString()}`, {
+    const resp = await fetch(url, {
       signal: ctrl.signal,
       headers: { Accept: 'application/json' },
     })
     if (resp.status === 404) {
+      logSink?.({ ts: startedAt, url, via: 'lrclib', status: 404, ms: Date.now() - startedAt, ok: false, error: 'not found' })
       return { ok: false, status: 'not-found' }
     }
     if (!resp.ok) {
+      logSink?.({ ts: startedAt, url, via: 'lrclib', status: resp.status, ms: Date.now() - startedAt, ok: false, error: `HTTP ${resp.status}` })
       return { ok: false, status: 'http', detail: `HTTP ${resp.status}` }
     }
     const json = (await resp.json()) as Partial<LrclibTrack> & {
@@ -72,9 +93,11 @@ export async function fetchLyrics(query: LrclibQuery): Promise<LrclibResult> {
       syncedLyrics: json.syncedLyrics ?? null,
       plainLyrics: json.plainLyrics ?? null,
     }
+    logSink?.({ ts: startedAt, url, via: 'lrclib', status: resp.status, ms: Date.now() - startedAt, ok: true })
     return { ok: true, track }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    logSink?.({ ts: startedAt, url, via: 'lrclib', status: null, ms: Date.now() - startedAt, ok: false, error: msg })
     return { ok: false, status: 'network', detail: msg }
   } finally {
     clearTimeout(timer)

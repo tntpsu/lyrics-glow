@@ -14,6 +14,53 @@
 
 import { connectEvenRuntime, type EvenRuntime, type InputSource, type SwipeDir } from './even'
 import { fetchLyrics } from './lrclib'
+
+// Phone-side fetch debug log — captures every LRCLIB call so the user
+// can see what the API is returning when something doesn't work. Same
+// pattern as Glance v0.5.1 / Cue v0.3.4. Capped, in-memory only.
+const FETCH_LOG_CAP = 50
+const fetchLog: LyricsFetchLog[] = []
+function pushFetchLog(entry: LyricsFetchLog): void {
+  fetchLog.unshift(entry)
+  if (fetchLog.length > FETCH_LOG_CAP) fetchLog.length = FETCH_LOG_CAP
+  renderFetchLog()
+}
+function fmtAgo(ts: number): string {
+  const sec = Math.round((Date.now() - ts) / 1000)
+  if (sec < 60) return `${sec}s ago`
+  if (sec < 3600) return `${Math.round(sec / 60)}m ago`
+  return `${Math.round(sec / 3600)}h ago`
+}
+function renderFetchLog(): void {
+  const el = document.getElementById('fetch-log')
+  if (!el) return
+  if (fetchLog.length === 0) {
+    el.innerHTML = '<div style="color:#7b7b7b;">No fetches yet.</div>'
+    return
+  }
+  el.innerHTML = fetchLog
+    .map(e => {
+      const status = e.ok
+        ? `<span style="color:#2a2;">${e.status ?? '?'}</span>`
+        : `<span style="color:#c00;">${e.status ?? 'NET'}</span>`
+      const url = e.url.length > 80 ? e.url.slice(0, 77) + '…' : e.url
+      const err = e.error ? `<div style="color:#c00; margin-top:.15rem;">↳ ${escapeHtml(e.error)}</div>` : ''
+      return `<div style="padding:.35rem 0; border-bottom:1px solid #f0f0f0;">
+        <div style="display:flex; gap:.5rem; align-items:center;">
+          <span style="color:#999; min-width:6em;">${fmtAgo(e.ts)}</span>
+          ${status}
+          <span style="color:#555;">${e.via} ${e.ms}ms</span>
+        </div>
+        <div style="color:#232323; word-break:break-all;">${escapeHtml(url)}</div>
+        ${err}
+      </div>`
+    })
+    .join('')
+}
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
+}
+setLyricsLogger(pushFetchLog)
 import { lineWindow, parseLrc, pickLineIndex, type LrcLine } from './lrc'
 import { fetchNowPlaying, trackKey, type NowPlayingTrack } from './now-playing'
 import {
@@ -27,6 +74,7 @@ import {
   setOffsetMs,
   setStorageBridge,
 } from './storage'
+import { setLyricsLogger, type LyricsFetchLog } from './lrclib'
 
 const RENDER_TICK_MS = 250
 const NOW_PLAYING_POLL_MS = 3_000 // bridge poll cadence in auto-detect mode
@@ -112,6 +160,16 @@ app.innerHTML = `
         <li>Ring double-tap — re-anchor to the picker (clear manual line bias)</li>
         <li>Glasses double-tap — exit app</li>
       </ul>
+    </details>
+
+    <details style="margin-top:1rem;">
+      <summary style="cursor:pointer; color:#232323;">Recent fetches (debug)</summary>
+      <p style="color:#7b7b7b; font-size:.85em; margin:.5rem 0;">Last 50 calls to LRCLIB / phils-bridge with status, latency, error.</p>
+      <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
+        <button id="fetch-log-clear" type="button" style="padding:.35rem .7rem; cursor:pointer; background:#eee;">Clear</button>
+        <button id="fetch-log-refresh" type="button" style="padding:.35rem .7rem; cursor:pointer; background:#eee;">Refresh</button>
+      </div>
+      <div id="fetch-log" style="max-width:720px; max-height:280px; overflow-y:auto; font-family: ui-monospace, monospace; font-size:.8em; border:1px solid #ddd; padding:.5rem;"></div>
     </details>
 
     <p style="font-size:.75rem; color:#999; margin-top:1.5rem;">Lyrics: <a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a> (community-maintained, no account).</p>
@@ -302,6 +360,13 @@ async function loadFromInputs(): Promise<void> {
 loadBtn.addEventListener('click', () => { void loadFromInputs() })
 playBtn.addEventListener('click', () => { setPlaying(!isPlaying) })
 resetBtn.addEventListener('click', resetPlayback)
+
+// Wire fetch-log debug panel buttons (DOM elements added in v0.2.1)
+const fetchLogClearBtn = document.getElementById('fetch-log-clear') as HTMLButtonElement | null
+const fetchLogRefreshBtn = document.getElementById('fetch-log-refresh') as HTMLButtonElement | null
+if (fetchLogClearBtn) fetchLogClearBtn.addEventListener('click', () => { fetchLog.length = 0; renderFetchLog() })
+if (fetchLogRefreshBtn) fetchLogRefreshBtn.addEventListener('click', () => renderFetchLog())
+renderFetchLog()
 offsetSlider.addEventListener('input', () => {
   offsetMs = parseInt(offsetSlider.value, 10) || 0
   offsetLabel.textContent = String(offsetMs)
