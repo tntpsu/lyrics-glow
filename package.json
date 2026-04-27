@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "node scripts/regression.mjs",
-    "test:backends": "node scripts/test-backends.mjs"
+    "test:backends": "node scripts/test-backends.mjs",
+    "hub:upload": "cd ../Cue && node scripts/upload-dev.mjs --manifest ../lyrics-glow/app.json"
   },
   "devDependencies": {
     "@evenrealities/evenhub-cli": "^0.1.13",
