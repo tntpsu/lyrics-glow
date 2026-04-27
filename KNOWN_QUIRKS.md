@@ -160,3 +160,21 @@ Pre-v0.4.1 Cue: `endMicSession()` set `active = false` BEFORE awaiting `flush()`
 ### Cross-repo file copies are sandbox-blocked when they look like credential propagation
 
 Specifically, copying `.hub-portal-session.json` (Playwright session storage) from one repo to another via `cp` was denied — the sandbox treats it as cross-context credential reuse. Two valid workarounds: (1) move the file to `$HOME` and reference it from there in all repos (the `upload-dev.mjs` approach), (2) regenerate per-repo via headed first-login (slow). Don't try to bypass the sandbox prompt — the home-dir approach is cleaner anyway.
+
+### `jsdom` doesn't deploy to Cloudflare Workers — use `linkedom`
+
+When building a Worker that needs DOM parsing (e.g., `@mozilla/readability`),
+`jsdom` is the obvious pick but **it doesn't deploy**. Even with
+`compatibility_flags = ["nodejs_compat"]` in wrangler.toml, the build fails
+with 17+ "Could not resolve" errors for `path`, `url`, `fs`, `vm`, `zlib`,
+`stream`, and other node built-ins jsdom depends on transitively.
+
+**Fix**: swap to [`linkedom`](https://github.com/WebReflection/linkedom).
+Pure-JS DOM impl, runs natively in Workers, same `parseHTML(html).document`
+API. Mozilla Readability accepts the linkedom Document via a one-line
+`as unknown as Document` cast (the structural types match).
+
+Caught when adding /diag + /healthz to Glance's worker — it had been
+deployed-ready in code since v0.1 but never actually deployed via
+wrangler. Now Glance's Default-Worker feature (v0.5.0) is finally
+ship-able end-to-end.
