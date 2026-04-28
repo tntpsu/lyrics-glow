@@ -115,7 +115,7 @@ let autoDetectStatus = '' // last status line for the phone-side UI
 const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
   <main style="font-family: system-ui, sans-serif; max-width: 560px; margin: 2rem auto; padding: 0 1rem; color: #232323;">
-    <h1 style="margin: 0 0 .25rem 0;">Lyrics Glow <span style="font-size: .55em; color: #7b7b7b; font-weight: 400;">v__APP_VERSION__</span></h1>
+    <h1 style="margin: 0 0 .25rem 0;">Lyrics Glow <span style="font-size: .55em; color: #7b7b7b; font-weight: 400;">v${__APP_VERSION__}</span></h1>
     <p style="margin: 0 0 1rem 0; color: #555;">Karaoke through your glasses. Type a song, hit Load, then put on the glasses.</p>
 
     <section style="background: #f5f5f5; padding: 1rem 1.25rem; border-radius: 8px; margin-bottom: 1rem;">
