@@ -223,6 +223,59 @@ if (networkPerm?.whitelist) {
   }
 }
 
+// ─── Secret scan (errors) ────────────────────────────────────────────
+//
+// Catches accidental commits of bearer tokens, API keys, and similar.
+// Walks the same source set used by the whitelist check, plus scripts/.
+// Skips obvious placeholders and example/test lines so realistic-looking
+// fake values in fixtures don't trip it.
+
+const SECRET_PATTERNS = [
+  { name: 'OpenAI key',     re: /\bsk-(?!ant-)[A-Za-z0-9_\-]{30,}/g },
+  { name: 'Anthropic key',  re: /\bsk-ant-[A-Za-z0-9_\-]{30,}/g },
+  { name: 'Bearer literal', re: /Bearer\s+[A-Za-z0-9._\-]{30,}/gi },
+  { name: 'GitHub PAT',     re: /\b(?:gh[opsu]|github_pat)_[A-Za-z0-9_]{30,}/g },
+  { name: 'Google API key', re: /\bAIza[A-Za-z0-9_\-]{30,}/g },
+  { name: 'Stripe live key',re: /\bsk_live_[A-Za-z0-9]{20,}/g },
+  { name: 'Slack token',    re: /\bxox[abprs]-[A-Za-z0-9\-]{20,}/g },
+  { name: 'AWS key id',     re: /\bAKIA[A-Z0-9]{16}\b/g },
+]
+
+const SECRET_SKIP_PATTERNS = [
+  /placeholder/i,
+  /example/i,
+  /YOUR_/i,
+  /REPLACE/i,
+  /\bxxx+\b/,
+  /\$\{[^}]*\}/, // template-literal interpolation — usually env var, not literal
+  /process\.env\./, // env-var read, not a literal
+]
+
+function scanForSecrets() {
+  const out = []
+  const dirs = ['src', 'scripts', 'tests', 'worker-template']
+  for (const dir of dirs) {
+    for (const file of walkSource(dir)) {
+      const text = readFileSync(file, 'utf-8')
+      text.split('\n').forEach((line, i) => {
+        const trimmed = line.trim()
+        if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('#')) return
+        if (SECRET_SKIP_PATTERNS.some(p => p.test(line))) return
+        for (const pat of SECRET_PATTERNS) {
+          const m = line.match(pat.re)
+          if (m) {
+            out.push(`${file}:${i + 1}: possible ${pat.name}: ${m[0].slice(0, 24)}…`)
+          }
+        }
+      })
+    }
+  }
+  return out
+}
+
+const secretFindings = scanForSecrets()
+for (const f of secretFindings) errors.push(`secret leak risk — ${f}`)
+
 if (errors.length > 0) {
   console.error(`✗ ${PATH} has ${errors.length} error${errors.length > 1 ? 's' : ''}:`)
   for (const e of errors) console.error(`  - ${e}`)
