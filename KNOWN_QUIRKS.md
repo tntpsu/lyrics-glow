@@ -32,6 +32,17 @@ const body = new Blob([arrayBuffer], { type: 'application/octet-stream' })
 await fetch(url, { method: 'POST', body, ... })
 ```
 
+### `indexedDB.open()` silently doesn't persist in EvenHub WebView
+
+Tried IndexedDB as the storage layer for Hands Free v0.2 (programs, sessions, settings). Two failure modes observed in the WebView, both silent:
+
+1. **Doesn't persist across launches.** Save settings, fully close the app, re-open: empty.
+2. **Hangs `await indexedDB.open()`.** First launch sometimes never resolves OR rejects, so anything `await`ed before the bridge connect call blocks the bootstrap. Symptom: phone stuck on the initial `<p>Connecting…</p>` HTML; bridge connection logs never fire.
+
+**Fix:** use `bridge.setLocalStorage` / `bridge.getLocalStorage` (exposed as `runtime.setStorage` / `runtime.getStorage` in `src/even.ts` wrappers). The SDK-provided KV is the only reliably persistent client store in this WebView. Cue / WordDaily / Pulse / Glance all use it; Hands Free initially didn't and got bitten.
+
+**Also**: do storage work AFTER `connectEvenRuntime()` returns — never block bootstrap on a storage `await` that runs before bridge.
+
 ### Fallback paths must surface a visible signal
 
 If your code falls back to mock-mode on any failure, the user must be able to *see* why. We had a multi-hour debug loop because the diagnostic transcript got immediately overwritten by mock script content. Pattern: keep an `err` field in your stats and render it on screen.
@@ -80,6 +91,20 @@ The return value indicates the call was accepted by the SDK, not that the OS gra
 Always serialize render calls through a mutex. The `enqueue()` pattern in `src/even.ts` is the canonical fix.
 
 ## Testing
+
+### Vite HMR can leave stale `bridge.onEvenHubEvent` registrations
+
+After editing source files in a `npm run dev` loop with the simulator open, gestures sent via `/api/input` may stop reaching the JS handler. The SDK still logs `[EvenAppBridge] EvenHub event: …` internally, but your `bridge.onEvenHubEvent(cb)` callback never fires.
+
+Cause: HMR reloads the module that called `bridge.onEvenHubEvent`, but the bridge's previous registration may still hold a reference to the now-detached callback. Production page-loads aren't affected (they do a full reload, not module HMR).
+
+**Fix during dev:** `pkill -f evenhub-simulator` and re-launch after meaningful source changes. The pattern is documented at the top of `scripts/regression.mjs` for any project that adopts the e2e regression script.
+
+### Multiple `evenhub-simulator` instances on same `--automation-port` silently fight
+
+If two sim windows are running with `--automation-port 9899`, only the first responds to gesture API calls. The second logs `Address already in use` to stderr and degrades — but `/api/ping` still returns "pong" from the original. Symptom: gestures appear to dispatch but nothing happens.
+
+**Fix:** always `pkill -f evenhub-simulator && sleep 2` before relaunching the sim. Don't open a second sim window thinking the first crashed — the API is lying to you.
 
 ### The simulator runs desktop Chromium, NOT iOS WKWebView
 
