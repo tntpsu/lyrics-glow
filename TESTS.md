@@ -1,6 +1,6 @@
-# TESTS — coverage matrix (lyrics-glow v0.2.0)
+# TESTS — coverage matrix (lyrics-glow v0.4.0)
 
-Last updated: 2026-05-05 (seeded from coverage-matrix skill).
+Last updated: 2026-11-03 (v0.4.0 — SDK 0.0.16, contextual menu, SDK floor guard).
 
 Full taxonomy + discipline: `~/.claude/skills/coverage-matrix/SKILL.md`. Empty cells block the next ship. `/ship-app` blocks if this file has unfilled cells.
 
@@ -13,6 +13,9 @@ Full taxonomy + discipline: `~/.claude/skills/coverage-matrix/SKILL.md`. Empty c
 | Karaoke 3-line scroll | e2e | n/a | n/a | n/a | n/a | manual |
 | Tap-pause-resume | e2e | n/a | n/a | n/a | n/a | n/a |
 | Swipe-bias offset | e2e | n/a | n/a | n/a | n/a | n/a |
+| v0.4.0 contextual menu: Lyrics earlier / later move the persisted offset by 500 ms (state marker `offset=`), Restart with no song is a no-op; spec passes the SDK page-menu validator; `stepOffset` clamps to the slider range | e2e:5-7 + unit:menu | unit:menu (limits, unique ids, no exit item, clamp) | n/a | n/a | n/a | n/a |
+| Menu Restart song / Center on clock with a loaded song; Re-sync to player with auto-detect on | manual:hw (needs a loaded song and a live player) | e2e:7 (no song) | n/a | manual:hw | manual:hw | manual:hw |
+| SDK floor: pin ≥ 0.0.16, installed = pin, `app.json` `min_sdk_version` = installed (0.0.14 / 0.0.15 re-fire timers, see KNOWN_QUIRKS) | unit:sdk-floor | unit:sdk-floor | n/a | n/a | n/a | n/a |
 | Position-anchored clock | unit:lrc | unit:lrc | n/a | n/a | n/a | n/a |
 | Drift correction (re-anchor on >2s) | unit:lrc | n/a | n/a | manual:hw | unit:lrc | unit:lrc |
 | LRC parser (multi-stamp, dedupe) | unit:lrc:23 | unit:lrc:rejects | n/a | n/a | n/a | n/a |
@@ -24,8 +27,8 @@ Full taxonomy + discipline: `~/.claude/skills/coverage-matrix/SKILL.md`. Empty c
 ## By dimension (status)
 
 - **Static:** lint+tsc ✓, app-json validation ✓
-- **Unit:** 33/33 tests passing (LRC parser + binary-search line picker + drift correction)
-- **E2E:** `scripts/regression.mjs` — 5/5 simulator smoke regression
+- **Unit:** 54/54 tests passing (LRC parser + binary-search line picker + drift correction + Spotify + menu + SDK floor)
+- **E2E:** `scripts/regression.mjs` (`npm run test:e2e`, simulator 0.9.5 via `npm run sim`) — 8/8 simulator smoke regression. The double-tap exit runs last: simulator 0.9.5 honours `shutDownPageContainer`, so every input after it is dropped.
 - **Backend integration:** `scripts/test-backends.mjs` — LRCLIB live fetch
 - **Performance:** 250ms re-render cadence (faster than dashboard's 10s heartbeat) — verified by hand
 - **Security:** Spotify dev-app credentials in `.env` (v0.3 path); no secrets in source ✓

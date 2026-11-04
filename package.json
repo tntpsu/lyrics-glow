@@ -1,7 +1,7 @@
 {
   "name": "lyrics-glow",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,23 +9,23 @@
     "preview": "vite preview",
     "qr": "evenhub qr",
     "lint:app-json": "node scripts/lint-app-json.mjs",
-    "pack": "node scripts/lint-app-json.mjs && evenhub pack app.json dist -o lyrics-glow.ehpk",
-    "deploy": "npm run build && npm run pack && echo '\\nlyrics-glow.ehpk ready: '$(pwd)'/lyrics-glow.ehpk\\nUpload to https://hub.evenrealities.com/application'",
+    "pack": "node scripts/lint-app-json.mjs && evenhub pack app.json dist -o lyrics-glow.ehpk --sdk-ver $(node -p \"require('./node_modules/@evenrealities/even_hub_sdk/package.json').version\")",
+    "sim": "node node_modules/@evenrealities/evenhub-simulator/bin/index.js --automation-port 9898 http://localhost:5177",
+    "deploy": "npm run build && npm run pack && echo '\\nlyrics-glow.ehpk ready: '$(pwd)'/lyrics-glow.ehpk\\nUpload with npx evenhub upload lyrics-glow.ehpk -m <changelog>'",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "node scripts/regression.mjs",
-    "test:backends": "node scripts/test-backends.mjs",
-    "hub:upload": "cd ../Cue && node scripts/upload-dev.mjs --manifest ../lyrics-glow/app.json"
+    "test:backends": "node scripts/test-backends.mjs"
   },
   "devDependencies": {
-    "@evenrealities/evenhub-cli": "^0.1.13",
-    "@evenrealities/evenhub-simulator": "^0.7.3",
+    "@evenrealities/evenhub-cli": "^0.2.0",
+    "@evenrealities/evenhub-simulator": "^0.9.5",
     "jsdom": "^29.1.0",
     "typescript": "^5.9.3",
     "vite": "^8.0.10",
     "vitest": "^4.1.5"
   },
   "dependencies": {
-    "@evenrealities/even_hub_sdk": "^0.0.10"
+    "@evenrealities/even_hub_sdk": "0.0.16"
   }
 }

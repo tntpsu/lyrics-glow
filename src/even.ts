@@ -3,18 +3,23 @@
 // dedupe identical paints, expose tap/swipe/double-tap handlers, persist
 // state via the SDK localStorage.
 //
-// Why a mutex: SDK 0.0.10 docs warn that concurrent textContainerUpgrade
+// Why a mutex: the SDK docs warn that concurrent textContainerUpgrade
 // calls can crash the BLE connection. We render at 250ms so it's
 // especially important here.
 
 import {
   CreateStartUpPageContainer,
   EventSourceType,
+  MenuContainerProperty,
+  MenuItemProperty,
   OsEventTypeList,
   TextContainerProperty,
   TextContainerUpgrade,
+  isMenuNameWithinLimit,
+  isValidMenuItemID,
   waitForEvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
+import type { MenuSpec } from './menu'
 
 const MAIN_ID = 1
 const MAIN_NAME = 'main'
@@ -31,6 +36,9 @@ export interface EvenRuntime {
   onSwipe: (handler: (dir: SwipeDir, source: InputSource) => void) => void
   onDoubleTap: (handler: (source: InputSource) => void) => void
   onForeground: (handler: () => void) => void
+  // Contextual menu (tap-and-hold) selection, by the MenuSpec id passed to
+  // connectEvenRuntime. Unsupported firmware never fires it.
+  onMenuSelect: (handler: (itemID: number) => void) => void
   exitApp: () => Promise<void>
   getStorage: (key: string) => Promise<string>
   setStorage: (key: string, value: string) => Promise<boolean>
@@ -49,13 +57,30 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   })
 }
 
-export async function connectEvenRuntime(initial: string): Promise<EvenRuntime | null> {
+export async function connectEvenRuntime(
+  initial: string,
+  menu: readonly MenuSpec[] = [],
+): Promise<EvenRuntime | null> {
   let bridge: Awaited<ReturnType<typeof waitForEvenAppBridge>>
   try {
     bridge = await withTimeout(waitForEvenAppBridge(), BRIDGE_TIMEOUT_MS)
   } catch {
     return null
   }
+
+  // A malformed menu makes the firmware reject the whole page, so entries
+  // are filtered with the SDK's predicates before the page is built.
+  const seen = new Set<number>()
+  const menuItems = menu.filter(m => {
+    const ok = isValidMenuItemID(m.id) && isMenuNameWithinLimit(m.label) && !seen.has(m.id)
+    if (ok) seen.add(m.id)
+    return ok
+  }).slice(0, 10)
+  const menuObject = menuItems.length > 0
+    ? new MenuContainerProperty({
+      menuItems: menuItems.map(m => new MenuItemProperty({ itemName: m.label, itemID: m.id })),
+    })
+    : undefined
 
   const main = new TextContainerProperty({
     xPosition: 0,
@@ -72,7 +97,7 @@ export async function connectEvenRuntime(initial: string): Promise<EvenRuntime |
   })
 
   const created = await bridge.createStartUpPageContainer(
-    new CreateStartUpPageContainer({ containerTotalNum: 1, textObject: [main] }),
+    new CreateStartUpPageContainer({ containerTotalNum: 1, textObject: [main], menuObject }),
   )
   if (created !== 0) return null
 
@@ -90,6 +115,7 @@ export async function connectEvenRuntime(initial: string): Promise<EvenRuntime |
   let swipeHandler: ((dir: SwipeDir, source: InputSource) => void) | null = null
   let doubleTapHandler: ((source: InputSource) => void) | null = null
   let foregroundHandler: (() => void) | null = null
+  let menuHandler: ((itemID: number) => void) | null = null
 
   function classifySource(src: number | undefined): InputSource {
     if (src === EventSourceType.TOUCH_EVENT_FROM_RING) return 'ring'
@@ -103,6 +129,11 @@ export async function connectEvenRuntime(initial: string): Promise<EvenRuntime |
   }
 
   bridge.onEvenHubEvent(event => {
+    if (event.menuItemClickEvent) {
+      const id = event.menuItemClickEvent.itemID
+      if (typeof id === 'number') menuHandler?.(id)
+      return
+    }
     if (event.textEvent) {
       const t = event.textEvent.eventType ?? 0
       if (t === OsEventTypeList.SCROLL_TOP_EVENT) swipeHandler?.('up', 'unknown')
@@ -139,6 +170,7 @@ export async function connectEvenRuntime(initial: string): Promise<EvenRuntime |
     onSwipe(h) { swipeHandler = h },
     onDoubleTap(h) { doubleTapHandler = h },
     onForeground(h) { foregroundHandler = h },
+    onMenuSelect(h) { menuHandler = h },
     async exitApp(): Promise<void> { await bridge.shutDownPageContainer(1) },
     async getStorage(key) {
       try { return await bridge.getLocalStorage(key) } catch { return '' }

@@ -4,7 +4,9 @@
 
 A standalone Even Realities G2 plugin that scrolls time-synced lyrics on the 576×288 greyscale display in lockstep with whatever song you tell it. Three-line karaoke window (prev / **▶ current** / next / next+1), manual play/pause via tap, swipe to nudge ±1 line if the sync drifts.
 
-## Status: v0.2.1 (phone-side fetch debug log) (auto-detect Mac-side music via phils-bridge)
+## Status: v0.4.0 (SDK 0.0.16: tap-and-hold menu)
+
+> **v0.4.0 (2026-11-03):** SDK 0.0.10 → **0.0.16**, simulator 0.9.5, CLI 0.2.0; install floor is now Even app 2.2.10. Tap-and-hold opens a five-item contextual menu: Restart song, Lyrics earlier 500ms, Lyrics later 500ms (both move the same offset the phone slider edits and persist it), Center on clock (clears the swipe bias without a ring), Re-sync to player (forces the next auto-detect poll to reload and re-anchor). The state marker now carries `offset=` so the simulator run can assert the offset items without a song. `tests/sdk-floor.test.ts` refuses a pin below 0.0.16. 54 unit + 8 e2e green. v0.3.0 (Spotify Web API auto-detect) shipped without a README status update.
 
 The full karaoke renderer + LRCLIB lookup from v0.1.0, plus an optional auto-detect mode: paste your phils-bridge URL and toggle the checkbox, and Lyrics Glow will poll `/now-playing.json` every 3s, fetch fresh LRCLIB lyrics on every track change, and anchor the karaoke clock to the bridge-reported playback position. Works for music playing on your Mac (Music or Spotify desktop apps via AppleScript). iPhone Spotify auto-detect needs Spotify OAuth and is deferred to v0.3.
 
@@ -45,6 +47,7 @@ Manual song picker still works as before — useful when LRCLIB doesn't have the
 | Swipe down | Nudge current line forward (+1) |
 | Ring double-tap | Clear manual bias; resync to clock |
 | Glasses double-tap | Exit app |
+| Tap-and-hold | Contextual menu: Restart song, Lyrics earlier / later 500ms, Center on clock, Re-sync to player |
 
 ## When LRCLIB has no time-sync
 
@@ -58,9 +61,11 @@ npm run dev          # Vite dev server on :5177 (host 0.0.0.0 for LAN)
 npm run build        # tsc + vite build → dist/
 npm run pack         # evenhub pack → lyrics-glow.ehpk
 npm run deploy       # build + pack
-npm test             # Vitest unit tests (23 passing — LRC parser + LRCLIB client)
+npm test             # Vitest unit tests (54 passing)
 npm run test:watch   # Vitest watch mode
-npm run test:e2e     # Simulator-driven smoke test (5 passing)
+npm run sim          # simulator on :9898 against the dev server
+npm run test:e2e     # Simulator-driven smoke test (8 passing; needs dev + sim running)
+npx evenhub upload lyrics-glow.ehpk -m "<changelog>"   # CLI 0.2.0, after a one-time evenhub login from a real Terminal
 ```
 
 Test on real glasses via QR:
@@ -68,11 +73,9 @@ Test on real glasses via QR:
 npx evenhub qr --url http://<your-mac-lan-ip>:5177
 ```
 
-Test in simulator:
+Test in simulator (the package is scoped and ships no `.bin`, so `npx evenhub-simulator` 404s; `npm run sim` launches it by path):
 ```bash
-npx evenhub-simulator --glow http://localhost:5177
-# OR with automation port for the regression script:
-npx evenhub-simulator --automation-port 9898 http://localhost:5177
+npm run dev & npm run sim
 ```
 
 ## Source files
@@ -80,7 +83,8 @@ npx evenhub-simulator --automation-port 9898 http://localhost:5177
 | File | Purpose |
 |---|---|
 | `src/main.ts` | Entry, phone settings UI, state machine, 250ms render tick |
-| `src/even.ts` | Glasses bridge wrapper (text container, gestures, BLE-write mutex) |
+| `src/even.ts` | Glasses bridge wrapper (text container, gestures, contextual menu, BLE-write mutex) |
+| `src/menu.ts` | Contextual-menu spec (ids + verb labels) and the offset step/clamp |
 | `src/lrc.ts` | Pure-logic LRC parser + binary-search line picker + window helper |
 | `src/lrclib.ts` | LRCLIB HTTP client with tagged-union result type |
 | `src/storage.ts` | Native `setLocalStorage` wrapper for last song + offset memory |

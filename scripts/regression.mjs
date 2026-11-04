@@ -18,7 +18,7 @@
 //
 // Prereqs (run manually first):
 //   1. cd ~/Documents/lyrics-glow && npm run dev          # Vite on :5177
-//   2. npx evenhub-simulator --automation-port 9898 http://localhost:5177
+//   2. npm run sim                                 # simulator on :9898
 //
 // Then: npm run test:e2e
 
@@ -147,7 +147,39 @@ async function main() {
   check('swipe with no song is a no-op', afterSwipe.message.includes('bias=0'), afterSwipe.message)
   await screenshot('04-after-swipe')
 
-  console.log('5. Ring-style double-tap with no song — no crash, still ticking')
+  // ─── v0.4.0 contextual menu (simulator 0.9+) ─────────────────────────
+  // context_menu opens the SDK menu, down moves focus, click fires
+  // menuItemClickEvent for the focused item and closes the menu. The
+  // offset items work with no song loaded, so they are the ones a
+  // network-free run can assert on.
+  const menuPick = async (index) => {
+    await input('context_menu')
+    await new Promise(r => setTimeout(r, 400))
+    for (let i = 0; i < index; i += 1) await input('down')
+    await input('click')
+    await new Promise(r => setTimeout(r, 900))
+  }
+
+  console.log('5. Menu "Lyrics earlier 500ms" moves the offset to -500')
+  await menuPick(1)
+  const earlier = await waitForState(m => m.includes('offset=-500'), { label: 'offset -500', timeoutMs: 5_000 }).catch(() => null)
+  check('menu item 2 sets offset=-500', earlier !== null, earlier?.message ?? 'no offset=-500 tick')
+  await screenshot('05-menu-earlier')
+
+  console.log('6. Menu "Lyrics later 500ms" brings the offset back to 0')
+  await menuPick(2)
+  const later = await waitForState(m => m.includes('offset=0 ') || m.endsWith('offset=0'), { label: 'offset 0', timeoutMs: 5_000 }).catch(() => null)
+  check('menu item 3 returns offset to 0', later !== null, later?.message ?? 'no offset=0 tick')
+
+  console.log('7. Menu "Restart song" with no song loaded is a no-op and the loop keeps ticking')
+  await menuPick(0)
+  const afterRestart = await waitForState(m => m.includes('loaded=0'), { label: 'still idle after restart', timeoutMs: 5_000 }).catch(() => null)
+  check('menu item 1 without a song leaves the app idle and alive', afterRestart !== null && afterRestart.message.includes('playing=0'), afterRestart?.message ?? 'no tick')
+
+  // Last on purpose: the simulator honours shutDownPageContainer, so after
+  // this double-tap every further input is dropped ("no active event
+  // container" in the simulator log).
+  console.log('8. Glasses double-tap with no song — exits the page, loop keeps ticking')
   await input('double_click')
   // double_click without source info → onDoubleTap routes to even.exitApp()
   // which the simulator handles gracefully (no real exit). We just confirm
@@ -157,7 +189,8 @@ async function main() {
     { label: 'state still ticking after double_click', timeoutMs: 3_000 },
   ).catch(() => null)
   check('app survives double-tap (no crash)', stillTicking !== null, stillTicking?.message ?? 'no further state tick')
-  await screenshot('05-after-double-tap')
+  await screenshot('08-after-double-tap')
+
 
   console.log()
   console.log(`Result: ${pass} passed, ${fail} failed`)

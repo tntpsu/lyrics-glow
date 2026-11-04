@@ -15,8 +15,10 @@ npm run dev                   # Vite (port set in vite.config.ts)
 npm run build                 # tsc + vite build → dist/
 npm run pack                  # lint-app-json + evenhub pack → lyrics-glow.ehpk
 npm run deploy                # build + pack
-npm test                      # vitest (33 tests)
-npm run test:e2e              # simulator regression
+npm test                      # vitest (54 tests)
+npm run sim                   # simulator on :9898 (launched by path; npx evenhub-simulator 404s)
+npm run test:e2e              # simulator regression (8 checks), needs dev + sim running
+npx evenhub upload lyrics-glow.ehpk -m "<changelog>"   # CLI 0.2.0; one-time `evenhub login` from a real Terminal
 npm run test:backends         # live integration tests against LRCLIB + phils-bridge
 npx evenhub qr --url http://<lan-ip>:<port>
 ```
@@ -40,6 +42,7 @@ npx evenhub qr --url http://<lan-ip>:<port>
 - **LRCLIB occasionally returns synced lyrics with malformed timestamps** (`[mm:ss]` without subseconds). Parser must handle both `[mm:ss]` and `[mm:ss.cc]`.
 - **phils-bridge polling is 1.5s** — too aggressive and the bridge complains; too slow and song-change detection lags. The 1.5s is empirically tuned.
 - **Concurrent `textContainerUpgrade` crashes the BLE link** — render serialized in `src/even.ts`. Same pattern as Cue / Pulse.
+- **SDK is 0.0.16, pinned exactly; `tests/sdk-floor.test.ts` refuses anything lower.** The contextual menu (`src/menu.ts`) is attached once at page creation in `src/even.ts`; the offset items edit the same `offsetMs` the phone slider does and persist it. The `[lyricsglow:state]` marker carries `offset=` so the simulator run can assert menu actions with no song loaded.
 
 ## Roadmap (v0.3+)
 

@@ -13,6 +13,16 @@
 // and is deferred to v0.3+.
 
 import { connectEvenRuntime, type EvenRuntime, type InputSource, type SwipeDir } from './even'
+import {
+  LYRICS_MENU,
+  MENU_CENTER,
+  MENU_EARLIER,
+  MENU_LATER,
+  MENU_RESTART,
+  MENU_RESYNC,
+  OFFSET_STEP_MS,
+  stepOffset,
+} from './menu'
 import { fetchLyrics } from './lrclib'
 
 // Phone-side fetch debug log — captures every LRCLIB call so the user
@@ -357,7 +367,7 @@ async function paint(): Promise<void> {
   // moment. The render-side dedupe (`lastRenderedKey`) prevents redundant BLE
   // writes when the visible content hasn't changed.
   // eslint-disable-next-line no-console
-  console.log(`[lyricsglow:state] line=${idxBase} bias=${manualLineBias} playing=${isPlaying ? 1 : 0} loaded=${song ? 1 : 0}`)
+  console.log(`[lyricsglow:state] line=${idxBase} bias=${manualLineBias} playing=${isPlaying ? 1 : 0} loaded=${song ? 1 : 0} offset=${offsetMs}`)
   const text = renderGlassesText()
   const key = `${text}`
   if (key === lastRenderedKey) return
@@ -386,6 +396,40 @@ function onDoubleTap(source: InputSource): void {
     return
   }
   if (even) void even.exitApp()
+}
+
+// --- contextual menu (tap-and-hold) ---
+
+// The offset is the same value the phone slider edits, so the slider is
+// kept in step and the change persists like a slider move.
+function nudgeOffset(deltaMs: number): void {
+  offsetMs = stepOffset(offsetMs, deltaMs)
+  offsetSlider.value = String(offsetMs)
+  offsetLabel.textContent = String(offsetMs)
+  void setOffsetMs(offsetMs)
+  void paint()
+}
+
+function onMenuSelect(id: number): void {
+  if (id === MENU_RESTART) {
+    if (song) resetPlayback()
+  } else if (id === MENU_EARLIER) {
+    nudgeOffset(-OFFSET_STEP_MS)
+  } else if (id === MENU_LATER) {
+    nudgeOffset(OFFSET_STEP_MS)
+  } else if (id === MENU_CENTER) {
+    manualLineBias = 0
+    void paint()
+  } else if (id === MENU_RESYNC) {
+    // Forget the current track key so the next poll reloads lyrics and
+    // re-anchors to the player's reported position.
+    if (!autoDetectOn) {
+      autoStatus.textContent = 'Re-sync needs auto-detect on.'
+      return
+    }
+    lastTrackKey = ''
+    void pollNowPlaying()
+  }
 }
 
 // --- load lyrics ---
@@ -626,7 +670,7 @@ async function bootstrap(): Promise<void> {
   // eslint-disable-next-line no-console
   console.log('[lyricsglow] bootstrap start')
   status.textContent = 'Connecting to glasses…'
-  even = await connectEvenRuntime(`Lyrics Glow v${__APP_VERSION__}\n\nLoading…`)
+  even = await connectEvenRuntime(`Lyrics Glow v${__APP_VERSION__}\n\nLoading…`, LYRICS_MENU)
 
   if (even) {
     setStorageBridge({ getStorage: even.getStorage, setStorage: even.setStorage })
@@ -697,6 +741,7 @@ async function bootstrap(): Promise<void> {
   even.onTap(onTap)
   even.onSwipe(onSwipe)
   even.onDoubleTap(onDoubleTap)
+  even.onMenuSelect(onMenuSelect)
   even.onForeground(() => { void paint() })
 
   // Start a render loop even before a song loads, so the dev preview / state
